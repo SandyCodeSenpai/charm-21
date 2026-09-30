@@ -1,4 +1,4 @@
-const CACHE = "charm21-v2";
+const CACHE = "charm21-v3";
 const ASSETS = [
   "./",
   "index.html",
@@ -10,6 +10,7 @@ const ASSETS = [
   "icons/icon-192.png",
   "icons/icon-512.png",
   "icons/apple-touch-icon.png",
+  "icons/badge-96.png",
 ];
 
 self.addEventListener("install", e => {
@@ -47,7 +48,7 @@ self.addEventListener("push", e => {
       body: m.body,
       tag: m.tag,
       icon: "icons/icon-192.png",
-      badge: "icons/icon-192.png",
+      badge: "icons/badge-96.png",
       data: { go: m.go || "now" },
     })
   );

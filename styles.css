@@ -119,7 +119,7 @@ button:focus-visible, textarea:focus-visible, summary:focus-visible { outline: 2
 .eyebrow { font-size: 12px; font-weight: 800; letter-spacing: .14em; text-transform: uppercase; color: var(--mute); }
 .eyebrow.ember { color: var(--ember); }
 h1, .display { font-family: var(--serif); font-weight: 400; letter-spacing: -0.025em; line-height: 1.05; margin: 0; }
-h1 { font-size: 40px; }
+h1 { font-size: clamp(31px, 10vw, 40px); }
 h1 em, .display em { font-style: italic; color: var(--ember); }
 .section { margin-top: 44px; }
 .section-head { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 14px; }
@@ -129,12 +129,13 @@ h1 em, .display em { font-style: italic; color: var(--ember); }
 
 /* Hero */
 .hero { text-align: center; padding-top: 4px; }
-.ring-wrap { position: relative; width: 260px; height: 260px; margin: 14px auto 6px; }
+.ring-wrap { position: relative; width: min(260px, 72vw); height: min(260px, 72vw); margin: 14px auto 6px; }
 .ring-wrap svg { width: 100%; height: 100%; overflow: visible; }
 .ring-center { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; }
-.numeral { font-family: var(--serif); font-size: 104px; font-weight: 300; line-height: .9; letter-spacing: -0.06em; font-variation-settings: "opsz" 144, "SOFT" 100; }
+.numeral { font-family: var(--serif); font-size: clamp(76px, 27vw, 104px); font-weight: 300; line-height: .9; letter-spacing: -0.06em; font-variation-settings: "opsz" 144, "SOFT" 100; }
 .numeral-sub { margin-top: 8px; font-size: 13px; color: var(--mute); font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
-.hero h1 { margin-top: 10px; font-size: 38px; }
+.hero h1 { margin-top: 10px; font-size: clamp(30px, 9.5vw, 38px); }
+.hero .eyebrow { text-wrap: balance; }
 .chip {
   display: inline-flex; align-items: center; gap: 6px; margin-top: 14px;
   padding: 6px 12px; border-radius: 999px; background: var(--card); border: 1px solid var(--hair);
@@ -168,14 +169,14 @@ h1 em, .display em { font-style: italic; color: var(--ember); }
 .now .btn { margin-top: 18px; }
 
 /* Principle */
-.principle { font-family: var(--serif); font-size: 23px; line-height: 1.38; letter-spacing: -0.012em; font-weight: 350; }
+.principle { font-family: var(--serif); font-size: clamp(20px, 6.2vw, 23px); line-height: 1.38; letter-spacing: -0.012em; font-weight: 350; }
 .principle::first-letter { font-size: 3.1em; float: left; line-height: .82; margin: 6px 10px 0 0; font-weight: 400; color: var(--ember); }
 .source { margin-top: 14px; font-size: 13px; color: var(--mute); font-weight: 600; }
 
 /* Missions */
 .missions { display: grid; gap: 10px; }
 .mission {
-  display: grid; grid-template-columns: 38px 1fr 34px; align-items: center; gap: 12px; text-align: left; width: 100%;
+  display: grid; grid-template-columns: 32px 1fr 32px; align-items: center; gap: 12px; text-align: left; width: 100%;
   padding: 16px 16px 16px 14px; border-radius: 18px; background: var(--card); border: 1px solid var(--hair);
   transition: background .3s, opacity .3s, transform .15s;
 }
@@ -211,7 +212,7 @@ h1 em, .display em { font-style: italic; color: var(--ember); }
 .face .tag { font-size: 11px; font-weight: 800; letter-spacing: .14em; text-transform: uppercase; }
 .front .tag { color: var(--bad); }
 .back .tag { color: var(--good); }
-.face .said { font-family: var(--serif); font-size: 21px; line-height: 1.3; margin: 10px 0; }
+.face .said { font-family: var(--serif); font-size: clamp(18px, 5.6vw, 21px); line-height: 1.3; margin: 10px 0; }
 .front .said { color: color-mix(in srgb, var(--paper) 70%, transparent); }
 .face .cta { font-size: 12.5px; color: var(--mute); font-weight: 700; display: flex; align-items: center; gap: 6px; }
 
@@ -239,7 +240,7 @@ textarea::placeholder { color: var(--dim); font-style: italic; }
 /* Quote */
 .fuel { position: relative; padding: 34px 4px 8px; }
 .fuel::before { content: "\201C"; position: absolute; top: -34px; left: -6px; font-family: var(--serif); font-size: 140px; line-height: 1; color: var(--ember); opacity: .35; }
-.fuel .q { font-family: var(--serif); font-size: 27px; line-height: 1.3; letter-spacing: -0.02em; font-weight: 350; }
+.fuel .q { font-family: var(--serif); font-size: clamp(22px, 7vw, 27px); line-height: 1.3; letter-spacing: -0.02em; font-weight: 350; }
 .fuel .by { margin-top: 14px; font-size: 13px; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; color: var(--mute); }
 .fuel .by::before { content: ""; display: inline-block; width: 24px; height: 1px; background: var(--mute); vertical-align: middle; margin-right: 10px; }
 
@@ -344,7 +345,7 @@ textarea::placeholder { color: var(--dim); font-style: italic; }
 .onboard .ambient { inset: -20vh -40vw auto; }
 .slides { flex: 1; display: flex; flex-direction: column; justify-content: center; }
 .slide { animation: rise .7s var(--ease); }
-.slide .big { font-family: var(--serif); font-size: 76px; line-height: .95; letter-spacing: -0.05em; font-weight: 300; }
+.slide .big { font-family: var(--serif); font-size: clamp(50px, 17vw, 76px); hyphens: none; overflow-wrap: normal; line-height: .95; letter-spacing: -0.05em; font-weight: 300; }
 .slide .big em { font-style: italic; background: var(--grad); -webkit-background-clip: text; background-clip: text; color: transparent; }
 .slide p { font-size: 19px; line-height: 1.5; color: color-mix(in srgb, var(--paper) 80%, transparent); margin-top: 22px; max-width: 30ch; }
 .slide .weeks { margin-top: 28px; display: grid; gap: 14px; }

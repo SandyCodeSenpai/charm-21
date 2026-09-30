@@ -163,7 +163,7 @@ function renderNow() {
   const lines = d.lines;
   $view.innerHTML = `
     <section class="hero">
-      <div class="eyebrow">${esc(GREETING[ph])} · ${isToday ? esc(fmtDate(i)) : `Day ${i + 1} ${i < ti ? "was" : "is"} ${esc(fmtDate(i))}`}</div>
+      <div class="eyebrow">${esc(GREETING[ph])} · ${esc(fmtDate(i, { month: "short", day: "numeric" }))}</div>
       <div class="ring-wrap">
         ${ringSVG(i)}
         <div class="ring-center"><div class="numeral">${pad2(i + 1)}</div><div class="numeral-sub">${esc(sub)}</div></div>
@@ -473,6 +473,9 @@ function importData(file) {
 const isIOS = /iPhone|iPad|iPod/.test(navigator.userAgent);
 const standalone = matchMedia("(display-mode: standalone)").matches || navigator.standalone === true;
 const pushCapable = "serviceWorker" in navigator && "PushManager" in window && "Notification" in window;
+let installPrompt = null; // Chrome/Android: captured so we can offer a real Install button
+addEventListener("beforeinstallprompt", e => { e.preventDefault(); installPrompt = e; });
+addEventListener("appinstalled", () => { installPrompt = null; toast("Installed. Open it from your home screen."); });
 
 function b64uToBytes(s) {
   const b = atob((s + "=".repeat((4 - (s.length % 4)) % 4)).replace(/-/g, "+").replace(/_/g, "/"));
@@ -522,6 +525,7 @@ function remindersHTML() {
     <h1>Let the plan <em>find you.</em></h1>
     <p class="muted" style="margin-top:10px">Pushed to your lock screen at set times, with the day's actual mission, line and question in each one.</p>
     ${status}
+    ${installPrompt && !standalone ? `<button class="toggle" data-r="install"><span><div style="font-weight:800">Install on this phone</div><div class="muted small">Home-screen icon, full screen, badge on the icon</div></span><span class="btn sm">Install</span></button>` : ""}
     <div class="section-head" style="margin-top:28px"><h2>Intensity</h2></div>
     <div class="levels">
       ${Object.entries(LEVELS).map(([k, v]) => `
@@ -560,6 +564,7 @@ async function onRemindersClick(e) {
   const [act, arg] = el.dataset.r.split(":");
   const n = state.notify;
   if (act === "close") return closeSheet();
+  if (act === "install" && installPrompt) { installPrompt.prompt(); await installPrompt.userChoice; installPrompt = null; return refreshSheet(); }
   if (act === "level") {
     n.level = arg;
     if (n.code) await makeCode(true);
@@ -571,14 +576,14 @@ async function onRemindersClick(e) {
       if (perm !== "granted") { toast("Notifications not allowed"); return refreshSheet(); }
       await makeCode(true);
       const reg = await navigator.serviceWorker.ready;
-      reg.showNotification("Reminders are on", { body: "Send your code to Claude and the first brief lands at 7:25.", icon: "icons/icon-192.png", badge: "icons/icon-192.png", tag: "welcome" });
+      reg.showNotification("Reminders are on", { body: "Send your code to Claude and the first brief lands at 7:25.", icon: "icons/icon-192.png", badge: "icons/badge-96.png", tag: "welcome" });
       save(); refreshSheet();
     } catch (err) { toast("Couldn't subscribe: " + (err.message || err)); }
   }
   if (act === "test") {
     const reg = await navigator.serviceWorker.ready;
     const m = buildMessage("morning", Math.max(0, Math.min(todayIndex(), 20)));
-    reg.showNotification(m.title, { body: m.body, icon: "icons/icon-192.png", badge: "icons/icon-192.png", tag: "test", data: { go: "now" } });
+    reg.showNotification(m.title, { body: m.body, icon: "icons/icon-192.png", badge: "icons/badge-96.png", tag: "test", data: { go: "now" } });
   }
   if (act === "copy") { await navigator.clipboard.writeText(n.code).then(() => toast("Code copied"), () => toast("Long-press the code to copy")); }
   if (act === "share") { navigator.share({ title: "Charm 21 reminder code", text: n.code }).catch(() => {}); }
@@ -608,7 +613,7 @@ function updateBadge() {
 function onboarding() {
   const ti = todayIndex();
   const slides = [
-    `<div class="big">Twenty-one <em>days.</em></div><p>You don't wait to feel confident. You act, and the feeling catches up. ${ti < 0 ? `Day 1 is ${fmtDate(0, { weekday: "long" })}.` : ""}</p>`,
+    `<div class="big">Twenty‑one <em>days.</em></div><p>You don't wait to feel confident. You act, and the feeling catches up. ${ti < 0 ? `Day 1 is ${fmtDate(0, { weekday: "long" })}.` : ""}</p>`,
     `<div class="big">Three <em>weeks.</em></div><div class="weeks">${WEEKS.map(w => `<div><b>${w.name}</b><span>${w.tagline}</span></div>`).join("")}</div>`,
     `<div class="big">Tap <em>+</em> after every stranger.</div><p>That orange button is your rep counter. Every tap is evidence. Every evening, one bar and one honest paragraph.</p>`,
     `<div class="big">Let it <em>find you.</em></div><p>Up to 8 pushes a day: the brief, your missions, a line to fix, a question at night.</p>`,
