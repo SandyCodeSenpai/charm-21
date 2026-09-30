@@ -1,0 +1,4 @@
+[2026-09-30T19:31:42.331Z] GET http://localhost:8321/ → 200 (9ms, 1323B)
+[2026-09-30T19:31:42.345Z] GET http://localhost:8321/styles.css → 200 (19ms, 7290B)
+[2026-09-30T19:31:42.345Z] GET http://localhost:8321/data.js → 200 (74ms, 22364B)
+[2026-09-30T19:31:42.345Z] GET http://localhost:8321/app.js → 200 (75ms, 15999B)
