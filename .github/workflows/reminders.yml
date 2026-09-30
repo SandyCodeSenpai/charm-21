@@ -1,0 +1,43 @@
+name: Reminders
+
+# Times are America/Los_Angeles (PDT, UTC-7) converted to UTC. Odd minutes dodge GitHub's top-of-hour queue.
+on:
+  schedule:
+    - cron: "25 14 * * *" # 7:25  morning brief
+    - cron: "40 15 * * *" # 8:40  voice warm-up
+    - cron: "55 16 * * *" # 9:55  mission 1
+    - cron: "25 19 * * *" # 12:25 rep check
+    - cron: "55 21 * * *" # 14:55 fix this line
+    - cron: "25 0 * * *"  # 17:25 mission 2
+    - cron: "25 2 * * *"  # 19:25 fuel
+    - cron: "25 4 * * *"  # 21:25 evening check-in
+  workflow_dispatch:
+    inputs:
+      slot:
+        description: Slot to send now
+        type: choice
+        options: [morning, voice, mission1, reps, line, mission2, fuel, checkin]
+        default: morning
+      day:
+        description: Day index override (0 = Oct 1). Leave blank for today.
+        required: false
+
+jobs:
+  send:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm install --no-save --no-package-lock web-push@3
+      - run: node push/send.mjs
+        env:
+          VAPID_PUBLIC_KEY: ${{ secrets.VAPID_PUBLIC_KEY }}
+          VAPID_PRIVATE_KEY: ${{ secrets.VAPID_PRIVATE_KEY }}
+          PUSH_SUBSCRIPTIONS: ${{ secrets.PUSH_SUBSCRIPTIONS }}
+          SCHEDULE: ${{ github.event.schedule }}
+          SLOT: ${{ inputs.slot }}
+          SLOT_FORCE: ${{ github.event_name == 'workflow_dispatch' }}
+          DAY: ${{ inputs.day }}

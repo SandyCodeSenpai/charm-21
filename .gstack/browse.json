@@ -1,8 +1,8 @@
 {
-  "pid": 47112,
-  "port": 22050,
-  "token": "f7513ad1-4b56-4e3c-a4db-ca5f5ec3868e",
-  "startedAt": "2026-09-30T19:31:42.105Z",
+  "pid": 52607,
+  "port": 55085,
+  "token": "0de94952-c1ee-4222-aedc-95c3d692fbdd",
+  "startedAt": "2026-09-30T20:26:31.866Z",
   "serverPath": "/Users/saimandava/Developer/gstack/browse/src/server.ts",
   "mode": "launched",
   "configHash": "303a7eeccc03078b"

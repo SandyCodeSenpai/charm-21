@@ -1,44 +1,53 @@
 const STORE_KEY = "charm21-v1";
 const $view = document.getElementById("view");
+const $layer = document.getElementById("layer");
+const $fab = document.getElementById("fab");
 
 // ── State ─────────────────────────────────────────────────────────
 let state = load();
 function load() {
-  try { return JSON.parse(localStorage.getItem(STORE_KEY)) || { days: {} }; }
-  catch { return { days: {} }; }
+  let s;
+  try { s = JSON.parse(localStorage.getItem(STORE_KEY)); } catch {}
+  s ||= {};
+  s.days ||= {};
+  s.notify ||= { level: "relentless", code: null, badge: true };
+  return s;
 }
 function save() {
   try { localStorage.setItem(STORE_KEY, JSON.stringify(state)); } catch {}
+  updateBadge();
 }
 function dayState(i) {
   return (state.days[i] ||= { tasks: {}, reps: 0, confidence: null, reflection: "", fillers: null });
 }
 
-// ── Dates ─────────────────────────────────────────────────────────
+// ── Dates & time of day ───────────────────────────────────────────
 function dateOf(i) { return new Date(PLAN_YEAR, PLAN_MONTH, i + 1); }
 function todayIndex() {
   const now = new Date();
-  const start = new Date(PLAN_YEAR, PLAN_MONTH, 1);
   const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  return Math.round((today - start) / 86400000);
+  return Math.round((today - new Date(PLAN_YEAR, PLAN_MONTH, 1)) / 86400000);
 }
+const inPlan = i => i >= 0 && i <= 20;
 function fmtDate(i, opts = { weekday: "short", month: "short", day: "numeric" }) {
   return dateOf(i).toLocaleDateString(undefined, opts);
 }
-function weekOf(i) { return WEEKS[Math.floor(i / 7)]; }
+const weekOf = i => WEEKS[Math.floor(i / 7)];
+function phase() {
+  const h = new Date().getHours();
+  return h >= 5 && h < 11 ? "dawn" : h >= 11 && h < 17 ? "day" : h >= 17 && h < 21 ? "dusk" : "night";
+}
+const GREETING = { dawn: "Good morning", day: "Good afternoon", dusk: "Good evening", night: "Late night" };
 
 // ── Tasks & completion ────────────────────────────────────────────
 function tasksFor(i) {
   const d = DAYS[i], s = dayState(i), w = weekOf(i);
-  const warm = d.lines.length
-    ? "Warm-up: read today's lines out loud. Slow, pitch drops at the end"
-    : "Warm-up: 60s talking out loud, slow, every sentence ends low";
   return [
-    { id: "warmup", text: warm, done: !!s.tasks.warmup },
-    ...d.missions.map((m, k) => ({ id: "m" + k, text: m, done: !!s.tasks["m" + k] })),
-    { id: "reps", text: `Talk to ${w.target} stranger${w.target > 1 ? "s" : ""} (${s.reps}/${w.target})`, done: s.reps >= w.target, auto: true },
-    { id: "checkin", text: "Evening check-in: confidence + reflection", done: s.confidence != null && s.reflection.trim().length > 0, auto: true },
-  ];
+    { id: "warmup", text: d.lines.length ? "Read today's lines out loud. Slow, and let each one land low." : "60 seconds talking out loud. Slow, every sentence ends low.", sub: "Voice warm-up" },
+    ...d.missions.map((m, k) => ({ id: "m" + k, text: m, sub: `Mission ${k + 1}` })),
+    { id: "reps", text: `Talk to ${w.target} stranger${w.target > 1 ? "s" : ""}`, sub: `${s.reps} of ${w.target} · tap + after each one`, auto: true, meter: Math.min(1, s.reps / w.target) },
+    { id: "checkin", text: "Evening check-in", sub: "Confidence + one honest paragraph", auto: true },
+  ].map(t => ({ ...t, done: t.id === "reps" ? s.reps >= w.target : t.id === "checkin" ? s.confidence != null && s.reflection.trim().length > 0 : !!s.tasks[t.id] }));
 }
 function pct(i) {
   const t = tasksFor(i);
@@ -52,268 +61,397 @@ function streak() {
   while (i >= 0 && pct(i) === 100) { n++; i--; }
   return n;
 }
+function nextAction(i) {
+  const h = new Date().getHours();
+  const order = h < 11 ? ["warmup", "m0", "reps", "m1", "checkin"]
+    : h < 19 ? ["m0", "reps", "m1", "warmup", "checkin"]
+    : h < 21 ? ["m1", "reps", "checkin", "m0", "warmup"]
+    : ["checkin", "m1", "reps", "m0", "warmup"];
+  const tasks = Object.fromEntries(tasksFor(i).map(t => [t.id, t]));
+  const id = order.find(k => !tasks[k].done);
+  const d = DAYS[i], s = dayState(i), w = weekOf(i);
+  if (!id) return { label: "Day complete.", text: i < 20 ? `That's who you are now. Tomorrow: ${DAYS[i + 1].title}.` : "Twenty-one days. Go look at the evidence.", btn: i < 20 ? null : ["See the evidence", "tab:evidence"] };
+  if (id === "warmup") return { label: "Warm up your voice.", text: tasks.warmup.text, btn: ["Open the lines", "go:lines"] };
+  if (id === "m0" || id === "m1") return { label: `Mission ${+id[1] + 1}.`, text: d.missions[+id[1]], btn: ["Mark it done", "task:" + id] };
+  if (id === "reps") return { label: "Talk to a stranger.", text: `${s.reps} of ${w.target} today. One real sentence counts. The scary one counts double.`, btn: ["I just did one", "rep"] };
+  return { label: "Check in.", text: d.reflect, btn: ["Rate today", "go:checkin"] };
+}
 
 // ── Helpers ───────────────────────────────────────────────────────
 const esc = s => String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-function toast(msg) {
+const pad2 = n => String(n).padStart(2, "0");
+const ICON = {
+  check: `<svg viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>`,
+  left: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M15 18l-6-6 6-6"/></svg>`,
+  right: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 18l6-6-6-6"/></svg>`,
+  chev: `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 9l6 6 6-6"/></svg>`,
+  flip: `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 12a9 9 0 0 1 15-6.7L21 8M21 3v5h-5M21 12a9 9 0 0 1-15 6.7L3 16M3 21v-5h5"/></svg>`,
+};
+let toastTimer;
+function toast(msg, undo) {
   document.querySelectorAll(".toast").forEach(t => t.remove());
   const t = document.createElement("div");
-  t.className = "toast"; t.textContent = msg;
+  t.className = "toast";
+  t.innerHTML = `<span>${esc(msg)}</span>${undo ? `<button>Undo</button>` : ""}`;
+  if (undo) t.querySelector("button").onclick = () => { undo(); t.remove(); };
   document.body.appendChild(t);
-  setTimeout(() => t.remove(), 2300);
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.remove(), undo ? 4000 : 2400);
 }
-const CHEERS = ["Rep logged. Evidence collected.", "That's who you are now.", "One more than yesterday.", "Scared and did it anyway. That's the whole game.", "Your nervous system just learned something."];
+const CHEERS = ["Evidence collected.", "That's who you are now.", "Scared and did it anyway.", "Your nervous system just learned something.", "One more than yesterday."];
 const cheer = () => CHEERS[Math.floor(Math.random() * CHEERS.length)];
 const ALL_QUOTES = [...DAYS.map(d => d.quote), ...EXTRA_QUOTES];
+const FEEL = n => n <= 2 ? "Frozen" : n <= 4 ? "In my head" : n <= 6 ? "Getting there" : n <= 8 ? "Present" : "Fearless";
+function buzz() { navigator.vibrate?.(12); }
 
 // ── Routing ───────────────────────────────────────────────────────
-let tab = "today";
+let tab = "now";
 let viewing = Math.max(0, Math.min(todayIndex(), 20));
+const flipped = new Set(); // "day:card" keys, so flips survive re-renders
 
-document.querySelector(".tabs").addEventListener("click", e => {
+document.querySelector(".dock").addEventListener("click", e => {
   const b = e.target.closest("button[data-tab]");
-  if (!b) return;
-  tab = b.dataset.tab;
-  if (tab === "today") viewing = Math.max(0, Math.min(todayIndex(), 20));
-  render();
+  if (b) go(b.dataset.tab);
 });
-
-function render() {
-  document.querySelectorAll(".tabs button").forEach(b => b.classList.toggle("active", b.dataset.tab === tab));
-  const ti = todayIndex();
-  document.getElementById("topMeta").textContent =
-    ti < 0 ? `Starts ${fmtDate(0, { month: "short", day: "numeric" })}` :
-    ti > 20 ? "Plan complete" : `Day ${ti + 1} of 21`;
-  ({ today: renderDay, plan: renderPlan, toolkit: renderToolkit, progress: renderProgress })[tab]();
-  window.scrollTo(0, 0);
+function go(t, keepDay) {
+  tab = t;
+  if (t === "now" && !keepDay) viewing = Math.max(0, Math.min(todayIndex(), 20));
+  render(true);
 }
 
-// ── Day view ──────────────────────────────────────────────────────
-function renderDay() {
-  const i = viewing, d = DAYS[i], s = dayState(i), w = weekOf(i), ti = todayIndex();
-  let banner = "";
-  if (ti < 0 && i === 0) banner = `<div class="banner">Starts ${fmtDate(0)}. Read Day 1 tonight so you walk in ready.</div>`;
-  else if (ti > 20 && i === 20) banner = `<div class="banner">21 days done. Keep running the toolkit. Scroll to Progress to see how far you came.</div>`;
-  else if (i !== ti && ti >= 0 && ti <= 20) banner = `<div class="banner">You're viewing ${i < ti ? "a past" : "a future"} day. <button class="btn small" data-act="goto-today">Go to today</button></div>`;
+function render(enter) {
+  document.documentElement.dataset.phase = phase();
+  document.querySelectorAll(".dock button").forEach(b => b.classList.toggle("active", b.dataset.tab === tab));
+  ({ now: renderNow, path: renderPath, guide: renderGuide, evidence: renderEvidence })[tab]();
+  $view.classList.remove("view-enter");
+  if (enter) { void $view.offsetWidth; $view.classList.add("view-enter"); window.scrollTo(0, 0); }
+  renderFab();
+  document.getElementById("bell").className = "bell " + (state.notify.code ? "on" : "off");
+}
+function rerender() { const y = scrollY; render(); scrollTo(0, y); }
+
+// ── Now ───────────────────────────────────────────────────────────
+function ringSVG(v) {
+  const ti = todayIndex(), c = 130, r = 112, step = 360 / 21, gap = 2.4;
+  const pt = (a, rad) => [c + rad * Math.cos((a * Math.PI) / 180), c + rad * Math.sin((a * Math.PI) / 180)];
+  let segs = "";
+  for (let k = 0; k < 21; k++) {
+    const a0 = -90 + k * step + gap / 2, a1 = a0 + step - gap;
+    const [x0, y0] = pt(a0, r), [x1, y1] = pt(a1, r);
+    const p = pct(k);
+    const stroke = p === 100 ? "url(#emb)" : p > 0 ? `rgba(242,165,65,${0.25 + 0.5 * p / 100})` : k <= ti ? "rgba(255,244,232,.16)" : "rgba(255,244,232,.08)";
+    segs += `<path d="M${x0.toFixed(2)},${y0.toFixed(2)} A${r},${r} 0 0 1 ${x1.toFixed(2)},${y1.toFixed(2)}" stroke="${stroke}" stroke-width="${k === ti ? 14 : 10}" fill="none"/>`;
+  }
+  const [mx, my] = pt(-90 + (v + 0.5) * step, r + 17);
+  return `<svg viewBox="0 0 260 260" aria-hidden="true">
+    <defs><linearGradient id="emb" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#f7c77d"/><stop offset=".5" stop-color="#f2a541"/><stop offset="1" stop-color="#e4572e"/></linearGradient></defs>
+    ${segs}<circle cx="${mx.toFixed(2)}" cy="${my.toFixed(2)}" r="3.5" fill="#f5eee6"/></svg>`;
+}
+
+function renderNow() {
+  const i = viewing, d = DAYS[i], s = dayState(i), w = weekOf(i), ti = todayIndex(), ph = phase();
+  const isToday = i === ti;
+  const sub = ti < 0 ? (ti === -1 ? "Starts tomorrow" : `Starts in ${-ti} days`) : `Day ${i + 1} of 21`;
+
+  let now;
+  if (ti < 0) now = { eyebrow: "Tonight", label: "Read Day 1. Turn on reminders.", text: "Tomorrow at 7:25 your first brief lands. Walk in already knowing the move.", btn: ["Set up reminders", "sheet:remind"] };
+  else if (ti > 20) now = { eyebrow: "After the 21", label: "Keep running the guide.", text: "The plan is done. The habits aren't. Open the Field Guide before any date.", btn: ["Open the guide", "tab:guide"] };
+  else if (!isToday) now = { eyebrow: i < ti ? "Looking back" : "Looking ahead", label: `This is Day ${i + 1}.`, text: `Today is Day ${ti + 1}: ${DAYS[ti].title}.`, btn: ["Back to today", "today"] };
+  else { const a = nextAction(i); now = { eyebrow: "Right now", ...a }; }
 
   const tasks = tasksFor(i);
-  const p = pct(i);
+  const lines = d.lines;
   $view.innerHTML = `
-    ${banner}
-    <div class="eyebrow">Week ${w.n} · ${esc(w.name)} · Day ${i + 1}</div>
-    <h1>${esc(d.title)}</h1>
-    <div class="source">${esc(fmtDate(i))} · ${esc(d.source)}</div>
-    <div class="bar"><i style="width:${p}%"></i></div>
-    <div class="bar-label">${p}% done today</div>
-
-    <h2>The principle</h2>
-    <div class="card principle">${esc(d.principle)}</div>
-
-    <h2>Today's missions</h2>
-    <div class="card">
-      ${tasks.map(t => `
-        <div class="task ${t.done ? "done" : ""} ${t.auto ? "auto" : ""}" ${t.auto ? "" : `data-task="${t.id}"`}>
-          <div class="box">${t.done ? "✓" : ""}</div><div class="txt">${esc(t.text)}</div>
-        </div>`).join("")}
-    </div>
-
-    ${d.lines.length ? `
-    <h2>Say it better</h2>
-    <div class="card">
-      ${d.lines.map(l => `<div class="line"><div class="flat">${esc(l.flat)}</div><div class="better">${esc(l.better)}</div></div>`).join("")}
-    </div>` : ""}
-
-    <h2>Stranger reps</h2>
-    <div class="card counter">
-      <div><div class="n">${s.reps}</div><div class="sub">target ${w.target} today</div></div>
-      <div class="stepper">
-        <button class="btn round" data-act="rep-" aria-label="Remove rep">−</button>
-        <button class="btn round primary" data-act="rep+" aria-label="Add rep">+</button>
+    <section class="hero">
+      <div class="eyebrow">${esc(GREETING[ph])} · ${isToday ? esc(fmtDate(i)) : `Day ${i + 1} ${i < ti ? "was" : "is"} ${esc(fmtDate(i))}`}</div>
+      <div class="ring-wrap">
+        ${ringSVG(i)}
+        <div class="ring-center"><div class="numeral">${pad2(i + 1)}</div><div class="numeral-sub">${esc(sub)}</div></div>
+        <div class="day-arrows">
+          <button data-act="prev" aria-label="Previous day" ${i === 0 ? "disabled" : ""}>${ICON.left}</button>
+          <button data-act="next" aria-label="Next day" ${i === 20 ? "disabled" : ""}>${ICON.right}</button>
+        </div>
       </div>
-    </div>
+      <div class="eyebrow ember">Week ${w.n} · ${esc(w.name)}</div>
+      <h1>${esc(d.title)}</h1>
+      <div class="chip"><i></i>${esc(d.source)} · ${pct(i)}% done</div>
+    </section>
 
-    ${d.memo ? `
-    <h2>Voice memo fillers</h2>
-    <div class="card">
-      <input type="number" min="0" inputmode="numeric" id="fillers" value="${s.fillers ?? ""}" placeholder="0">
-      <div class="hint">Count every "yeah", "like", "basically", "a couple of", "multiple". Lower is better.</div>
-    </div>` : ""}
+    <section class="now">
+      <div class="eyebrow">${esc(now.eyebrow)}</div>
+      <div class="label">${esc(now.label)}</div>
+      <p>${esc(now.text)}</p>
+      ${now.btn ? `<button class="btn hot" data-act="${now.btn[1]}">${esc(now.btn[0])}</button>` : ""}
+    </section>
 
-    <h2>Confidence today</h2>
-    <div class="card">
-      <div class="scale">${Array.from({ length: 10 }, (_, k) => `<button data-conf="${k + 1}" class="${s.confidence === k + 1 ? "on" : ""}">${k + 1}</button>`).join("")}</div>
-      <div class="hint">1 = stuck in my head all day · 10 = fully present, did the scary thing</div>
-    </div>
+    <section class="section">
+      <div class="section-head"><h2>The principle</h2></div>
+      <div class="principle">${esc(d.principle)}</div>
+      <div class="source">${esc(d.source)}</div>
+    </section>
 
-    <h2>Reflection</h2>
-    <div class="card">
-      <textarea id="reflection" placeholder="${esc(d.reflect)}">${esc(s.reflection)}</textarea>
-      <div class="hint">${esc(d.reflect)}</div>
-    </div>
+    <section class="section" id="sec-missions">
+      <div class="section-head"><h2>Today's work</h2><span class="muted small">${tasks.filter(t => t.done).length}/${tasks.length}</span></div>
+      <div class="missions">
+        ${tasks.map((t, k) => `
+          <button class="mission ${t.done ? "done" : ""}" data-act="${t.auto ? "auto:" + t.id : "task:" + t.id}" data-id="${t.id}">
+            <span class="no">${pad2(k + 1)}</span>
+            <span class="t">${esc(t.text)}<span class="sub">${esc(t.sub)}</span>${t.meter != null ? `<span class="meter"><i style="width:${t.meter * 100}%"></i></span>` : ""}</span>
+            <span class="check">${ICON.check}</span>
+          </button>`).join("")}
+      </div>
+    </section>
 
-    <h2>Fuel</h2>
-    <div class="card quote" id="quoteBox">
-      <div class="q">“${esc(d.quote.text)}”</div>
-      <div class="by">${esc(d.quote.by)}</div>
-    </div>
-    <button class="btn small" data-act="quote">Another one</button>
+    ${lines.length ? `
+    <section class="section" id="sec-lines">
+      <div class="section-head"><h2>Fix the line</h2><span class="muted small">Say yours first, then flip</span></div>
+      <div class="flips">
+        ${lines.map((l, k) => `
+          <button class="flip ${flipped.has(i + ":" + k) ? "on" : ""}" data-act="flip:${k}" aria-label="Flip card ${k + 1}">
+            <div class="flip-inner">
+              <div class="face front"><span class="tag">Flat</span><div class="said">${esc(l.flat)}</div><span class="cta">${ICON.flip} How would you say it? Tap to flip</span></div>
+              <div class="face back"><span class="tag">Better</span><div class="said">${esc(l.better)}</div><span class="cta">${ICON.flip} Now say it out loud. Slow.</span></div>
+            </div>
+          </button>`).join("")}
+      </div>
+    </section>` : ""}
 
-    <div class="day-nav">
-      ${i > 0 ? `<button class="btn" data-act="prev">← Day ${i}</button>` : "<span></span>"}
-      ${i < 20 ? `<button class="btn" data-act="next">Day ${i + 2} →</button>` : "<span></span>"}
-    </div>
+    <section class="section" id="sec-checkin">
+      <div class="section-head"><h2>Tonight</h2><span class="muted small">${ph === "dusk" || ph === "night" ? "Now's the time" : "Fill in before bed"}</span></div>
+      <div class="checkin">
+        <div class="eyebrow">How present were you today?</div>
+        <div class="signal">
+          ${Array.from({ length: 10 }, (_, k) => `<button data-conf="${k + 1}" class="${s.confidence >= k + 1 ? "lit" : ""}" style="height:${22 + k * 8.6}%" aria-label="${k + 1} out of 10"><span>${k + 1}</span></button>`).join("")}
+        </div>
+        <div class="signal-read"><span class="word">${s.confidence ? FEEL(s.confidence) : "Tap a bar"}</span><span class="num">${s.confidence ? s.confidence + " / 10" : ""}</span></div>
+        <textarea id="reflection" placeholder="${esc(d.reflect)}">${esc(s.reflection)}</textarea>
+        ${d.memo ? `
+        <div class="stepper">
+          <div><div style="font-weight:800">Memo fillers</div><div class="muted small">yeah · like · basically · multiple</div></div>
+          <div class="ctl"><button data-act="fill-" aria-label="Fewer">−</button><span class="v">${s.fillers ?? 0}</span><button data-act="fill+" aria-label="More">+</button></div>
+        </div>` : ""}
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="section-head"><h2>Fuel</h2><button class="btn sm ghost" data-act="quote">Another →</button></div>
+      <div class="fuel" id="quoteBox"><div class="q">${esc(d.quote.text)}</div><div class="by">${esc(d.quote.by)}</div></div>
+    </section>
   `;
 }
 
+function renderFab() {
+  const show = tab === "now" && inPlan(todayIndex()) && viewing <= todayIndex();
+  $fab.hidden = !show;
+  if (!show) return;
+  const s = dayState(viewing), t = weekOf(viewing).target;
+  $fab.style.setProperty("--p", Math.min(100, (s.reps / t) * 100));
+  document.getElementById("fabCnt").textContent = `${s.reps}/${t}`;
+}
+$fab.addEventListener("click", () => logRep());
+function logRep() {
+  const s = dayState(viewing), t = weekOf(viewing).target;
+  s.reps++; save(); buzz();
+  $fab.classList.remove("hit"); void $fab.offsetWidth; $fab.classList.add("hit");
+  if (tab === "now") rerender();
+  toast(s.reps === t ? `Target hit. ${cheer()}` : `Rep ${s.reps}. ${cheer()}`, () => { s.reps = Math.max(0, s.reps - 1); save(); rerender(); });
+}
+
+function focusSection(id) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.scrollIntoView({ behavior: "smooth", block: "start" });
+  const target = el.querySelector(".checkin, .missions, .flips") || el;
+  target.classList.remove("flash"); void target.offsetWidth; target.classList.add("flash");
+}
+function handleGo(where) {
+  if (where === "evidence") return go("evidence");
+  if (tab !== "now" || viewing !== todayIndex()) go("now");
+  if (where === "reps") { $fab.classList.remove("hint"); void $fab.offsetWidth; $fab.classList.add("hint"); return; }
+  if (["missions", "lines", "checkin"].includes(where)) setTimeout(() => focusSection("sec-" + where), 120);
+}
+
+// ── Events on the main view ───────────────────────────────────────
 $view.addEventListener("click", e => {
-  const task = e.target.closest("[data-task]");
-  if (task) {
-    const s = dayState(viewing);
-    s.tasks[task.dataset.task] = !s.tasks[task.dataset.task];
-    save(); rerenderKeepScroll();
-    if (s.tasks[task.dataset.task]) toast(pct(viewing) === 100 ? "Day complete. That's who you are now." : cheer());
-    return;
-  }
   const conf = e.target.closest("[data-conf]");
-  if (conf) {
-    dayState(viewing).confidence = +conf.dataset.conf;
-    save(); rerenderKeepScroll(); return;
-  }
-  const act = e.target.closest("[data-act]")?.dataset.act;
-  if (!act) return;
+  if (conf) { dayState(viewing).confidence = +conf.dataset.conf; save(); buzz(); rerender(); return; }
+  const el = e.target.closest("[data-act]");
+  if (!el) return;
+  const [act, arg] = el.dataset.act.split(":");
   const s = dayState(viewing);
-  if (act === "rep+") { s.reps++; save(); rerenderKeepScroll(); toast(cheer()); }
-  else if (act === "rep-") { s.reps = Math.max(0, s.reps - 1); save(); rerenderKeepScroll(); }
-  else if (act === "prev") { viewing--; render(); }
-  else if (act === "next") { viewing++; render(); }
-  else if (act === "goto-today") { viewing = todayIndex(); render(); }
-  else if (act === "quote") {
-    const q = ALL_QUOTES[Math.floor(Math.random() * ALL_QUOTES.length)];
-    document.getElementById("quoteBox").innerHTML = `<div class="q">“${esc(q.text)}”</div><div class="by">${esc(q.by)}</div>`;
-  }
-  else if (act === "open-day") { viewing = +e.target.closest("[data-day]").dataset.day; tab = "today"; render(); }
-  else if (act === "export") exportData();
-  else if (act === "import") document.getElementById("importFile").click();
-  else if (act === "reset") {
-    if (confirm("Erase all progress? This can't be undone.")) { state = { days: {} }; save(); render(); }
+  switch (act) {
+    case "task": {
+      s.tasks[arg] = !s.tasks[arg]; save(); buzz(); rerender();
+      if (s.tasks[arg]) {
+        document.querySelector(`.mission[data-id="${arg}"]`)?.classList.add("just");
+        toast(pct(viewing) === 100 ? "Day complete. That's who you are now." : cheer());
+      }
+      break;
+    }
+    case "auto":
+      if (arg === "reps") handleGo("reps"); else focusSection("sec-checkin");
+      break;
+    case "rep": logRep(); break;
+    case "go": focusSection("sec-" + arg); break;
+    case "tab": go(arg); break;
+    case "today": go("now"); break;
+    case "sheet": openReminders(); break;
+    case "prev": viewing--; render(true); break;
+    case "next": viewing++; render(true); break;
+    case "flip": { const key = viewing + ":" + arg; flipped.has(key) ? flipped.delete(key) : flipped.add(key); el.classList.toggle("on"); buzz(); break; }
+    case "fill+": s.fillers = (s.fillers ?? 0) + 1; save(); rerender(); break;
+    case "fill-": s.fillers = Math.max(0, (s.fillers ?? 0) - 1); save(); rerender(); break;
+    case "quote": {
+      const q = ALL_QUOTES[Math.floor(Math.random() * ALL_QUOTES.length)];
+      const box = document.getElementById("quoteBox");
+      box.innerHTML = `<div class="q">${esc(q.text)}</div><div class="by">${esc(q.by)}</div>`;
+      box.classList.remove("view-enter"); void box.offsetWidth; box.classList.add("view-enter");
+      break;
+    }
+    case "day": viewing = +arg; go("now", true); break;
+    case "export": exportData(); break;
+    case "import": document.getElementById("importFile").click(); break;
+    case "reset":
+      if (confirm("Erase all progress? This can't be undone.")) { state.days = {}; save(); render(); }
+      break;
   }
 });
-
 let saveTimer;
 $view.addEventListener("input", e => {
-  const s = dayState(viewing);
-  if (e.target.id === "reflection") s.reflection = e.target.value;
-  else if (e.target.id === "fillers") s.fillers = e.target.value === "" ? null : Math.max(0, +e.target.value);
-  else return;
-  clearTimeout(saveTimer);
-  saveTimer = setTimeout(save, 300);
+  if (e.target.id !== "reflection") return;
+  dayState(viewing).reflection = e.target.value;
+  clearTimeout(saveTimer); saveTimer = setTimeout(save, 300);
 });
 $view.addEventListener("change", e => {
-  if (e.target.id === "reflection" || e.target.id === "fillers") { save(); rerenderKeepScroll(); }
+  if (e.target.id === "reflection") { save(); const t = e.target.value; rerender(); if (t.trim()) toast("Saved. " + cheer()); }
   if (e.target.id === "importFile") importData(e.target.files[0]);
 });
 
-function rerenderKeepScroll() {
-  const y = window.scrollY;
-  render();
-  window.scrollTo(0, y);
-}
+// Swipe between days on Now
+let tx = null, ty = null;
+$view.addEventListener("touchstart", e => { if (tab === "now" && !e.target.closest("textarea")) { tx = e.touches[0].clientX; ty = e.touches[0].clientY; } }, { passive: true });
+$view.addEventListener("touchend", e => {
+  if (tx == null) return;
+  const dx = e.changedTouches[0].clientX - tx, dy = e.changedTouches[0].clientY - ty;
+  tx = null;
+  if (Math.abs(dx) < 70 || Math.abs(dy) > Math.abs(dx) * 0.6) return;
+  if (dx < 0 && viewing < 20) { viewing++; render(true); }
+  if (dx > 0 && viewing > 0) { viewing--; render(true); }
+});
 
-// ── Plan view ─────────────────────────────────────────────────────
-function renderPlan() {
+// ── Path ──────────────────────────────────────────────────────────
+function renderPath() {
   const ti = todayIndex();
-  $view.innerHTML = WEEKS.map(w => {
-    const idx = [0, 1, 2, 3, 4, 5, 6].map(k => (w.n - 1) * 7 + k);
-    return `
-      <div class="week-head"><b>Week ${w.n}: ${esc(w.name)}</b><span>${esc(w.tagline)}</span></div>
-      <div class="grid">
-        ${idx.map(i => {
-          const p = pct(i);
-          const cls = [p === 100 ? "full" : p > 0 ? "part" : "", i === ti ? "today" : ""].join(" ");
-          return `<div class="cell ${cls}" data-act="open-day" data-day="${i}">${i + 1}<small>${fmtDate(i, { weekday: "narrow" })}</small></div>`;
-        }).join("")}
-      </div>
-      <div class="plan-list" style="margin-top:10px">
-        ${idx.map(i => `
-          <div class="card" data-act="open-day" data-day="${i}">
-            <div class="source">Day ${i + 1} · ${esc(fmtDate(i))} · ${pct(i)}%</div>
-            <div class="t">${esc(DAYS[i].title)}</div>
-          </div>`).join("")}
-      </div>`;
-  }).join("");
-}
-
-// ── Toolkit view ──────────────────────────────────────────────────
-function renderToolkit() {
   $view.innerHTML = `
-    <h1>Toolkit</h1>
-    <p class="source">Read before a date, before a hard conversation, or when you want to play a game.</p>
-    ${TOOLKIT.map(sec => `
-      <h2>${esc(sec.title)}</h2>
-      <div class="card tk ${sec.title.includes("dark") ? "dark" : ""}"><ul>${sec.items.map(x => `<li>${esc(x)}</li>`).join("")}</ul></div>
-    `).join("")}
+    <div class="eyebrow ember">The path</div>
+    <h1>Twenty-one <em>days.</em></h1>
+    <p class="muted" style="margin-top:12px">Oct 1 to Oct 21. Tap any day to open it.</p>
+    ${WEEKS.map(w => {
+      const idx = [0, 1, 2, 3, 4, 5, 6].map(k => (w.n - 1) * 7 + k);
+      return `
+      <section class="week">
+        <div class="week-title"><span class="eyebrow">Week ${w.n}</span></div>
+        <div class="display" style="font-size:44px;font-style:italic">${esc(w.name)}</div>
+        <div class="week-sub">${esc(w.tagline)} · ${esc(fmtDate(idx[0], { month: "short", day: "numeric" }))}–${esc(fmtDate(idx[6], { day: "numeric" }))} · ${w.target} rep${w.target > 1 ? "s" : ""} a day</div>
+        <div class="trail">
+          ${idx.map(i => {
+            const p = pct(i);
+            return `<button class="stop ${i === ti ? "today" : ""} ${i > ti ? "future" : ""}" data-act="day:${i}">
+              <span class="node ${p === 100 ? "full" : ""}" style="--p:${p}"><span>${i + 1}</span></span>
+              <span><span class="meta">${esc(fmtDate(i))}${i === ti ? `<span class="pill-today">Today</span>` : ""}${p > 0 && p < 100 ? ` · ${p}%` : ""}</span><span class="name" style="display:block">${esc(DAYS[i].title)}</span></span>
+            </button>`;
+          }).join("")}
+        </div>
+      </section>`;
+    }).join("")}
   `;
 }
 
-// ── Progress view ─────────────────────────────────────────────────
-function spark(values, max, label) {
-  const pts = values.map((v, i) => v == null ? null : [i, v]).filter(Boolean);
-  if (pts.length < 2) return `<div class="hint">Log at least 2 days of ${label} to see the trend.</div>`;
-  const W = 300, H = 110, pad = 8;
-  const x = i => pad + (i / 20) * (W - pad * 2);
-  const y = v => H - pad - (v / max) * (H - pad * 2);
-  const d = pts.map(([i, v], k) => `${k ? "L" : "M"}${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(" ");
-  return `<svg class="spark" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">
-    <line x1="${pad}" x2="${W - pad}" y1="${H - pad}" y2="${H - pad}" stroke="var(--line)"/>
-    <path d="${d}" fill="none" stroke="var(--accent)" stroke-width="2.5" vector-effect="non-scaling-stroke" stroke-linejoin="round"/>
-    ${pts.map(([i, v]) => `<circle cx="${x(i)}" cy="${y(v)}" r="3" fill="var(--accent)"/>`).join("")}
-  </svg>`;
+// ── Guide ─────────────────────────────────────────────────────────
+const TIER_STYLE = [
+  { k: "Texting", h: "Text rules", c: "#f5eee6" },
+  { k: "Speaking", h: "Voice rules", c: "#f5eee6" },
+  { k: "Use freely", h: "Greene at full power", c: "#8fd19e" },
+  { k: "Light touch", h: "Greene, the light version", c: "#f2a541" },
+  { k: "Know it, don't run it", h: "The dark chapters", c: "#ef8a73" },
+  { k: "Before any move", h: "Secure or scared?", c: "#b9b3ff" },
+];
+function renderGuide() {
+  $view.innerHTML = `
+    <div class="eyebrow ember">Field guide</div>
+    <h1>Read this <em>before</em> you walk in.</h1>
+    <p class="muted" style="margin:12px 0 26px">Before a date, a hard conversation, or any time you're tempted to play a game.</p>
+    ${TOOLKIT.map((sec, k) => `
+      <details class="tier" style="--c:${TIER_STYLE[k]?.c}" ${k === 5 ? "open" : ""}>
+        <summary><span><span class="k">${esc(TIER_STYLE[k]?.k || "")}</span><span class="h">${esc(TIER_STYLE[k]?.h || sec.title)}</span></span><span class="chev">${ICON.chev}</span></summary>
+        <ul>${sec.items.map(x => `<li>${esc(x)}</li>`).join("")}</ul>
+      </details>`).join("")}
+  `;
 }
 
-function renderProgress() {
+// ── Evidence ──────────────────────────────────────────────────────
+function area(values, max, color) {
+  const pts = values.map((v, i) => (v == null ? null : [i, v])).filter(Boolean);
+  if (pts.length < 2) return `<div class="empty">Log two days to see the line.</div>`;
+  const W = 320, H = 140, px = 6, py = 10, span = Math.max(6, pts.at(-1)[0]);
+  const x = i => px + (i / span) * (W - px * 2), y = v => H - py - (v / max) * (H - py * 2);
+  const line = pts.map(([i, v], k) => `${k ? "L" : "M"}${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(" ");
+  const fill = `${line} L${x(pts.at(-1)[0]).toFixed(1)},${H - py} L${x(pts[0][0]).toFixed(1)},${H - py} Z`;
+  const id = "g" + Math.random().toString(36).slice(2, 7);
+  return `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">
+    <defs><linearGradient id="${id}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${color}" stop-opacity=".35"/><stop offset="1" stop-color="${color}" stop-opacity="0"/></linearGradient></defs>
+    ${[0.25, 0.5, 0.75].map(f => `<line x1="0" x2="${W}" y1="${py + f * (H - py * 2)}" y2="${py + f * (H - py * 2)}" stroke="rgba(255,244,232,.07)"/>`).join("")}
+    <path d="${fill}" fill="url(#${id})"/>
+    <path d="${line}" fill="none" stroke="${color}" stroke-width="2.5" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>
+    ${pts.map(([i, v]) => `<circle cx="${x(i)}" cy="${y(v)}" r="3.5" fill="${color}"/>`).join("")}
+  </svg>`;
+}
+function renderEvidence() {
   const idx = DAYS.map((_, i) => i);
   const done = idx.filter(i => pct(i) === 100).length;
   const reps = idx.reduce((a, i) => a + (state.days[i]?.reps || 0), 0);
   const confs = idx.map(i => state.days[i]?.confidence ?? null);
   const logged = confs.filter(c => c != null);
   const avg = logged.length ? (logged.reduce((a, b) => a + b, 0) / logged.length).toFixed(1) : "–";
-  const fills = idx.map(i => DAYS[i].memo ? (state.days[i]?.fillers ?? null) : null);
-  const maxFill = Math.max(5, ...fills.filter(f => f != null));
+  const fills = idx.map(i => (DAYS[i].memo ? state.days[i]?.fillers ?? null : null));
   const refl = idx.filter(i => state.days[i]?.reflection?.trim()).reverse();
 
   $view.innerHTML = `
-    <h1>Progress</h1>
+    <div class="eyebrow ember">Evidence</div>
+    <h1>Confidence is <em>evidence.</em></h1>
+    <p class="muted" style="margin-top:12px">Every rep is proof. This is the pile.</p>
     <div class="stats">
-      <div class="stat"><div class="v">${done}/21</div><div class="k">days complete</div></div>
+      <div class="stat hero-stat"><div class="v">${reps}</div><div class="k">conversations with strangers you almost didn't have</div></div>
+      <div class="stat"><div class="v">${done}<small>/21</small></div><div class="k">days complete</div></div>
       <div class="stat"><div class="v">${streak()}</div><div class="k">day streak</div></div>
-      <div class="stat"><div class="v">${reps}</div><div class="k">stranger reps</div></div>
-      <div class="stat"><div class="v">${avg}</div><div class="k">avg confidence</div></div>
+      <div class="stat"><div class="v">${avg}</div><div class="k">avg presence</div></div>
+      <div class="stat"><div class="v" style="font-size:26px;line-height:1.15;font-style:italic">${logged.length ? FEEL(Math.round(+avg)) : "–"}</div><div class="k">your usual state</div></div>
     </div>
 
-    <h2>Confidence (1–10)</h2>
-    <div class="card">${spark(confs, 10, "confidence")}</div>
-
-    <h2>Memo fillers (lower is better)</h2>
-    <div class="card">${spark(fills, maxFill, "memo fillers")}</div>
-
-    <h2>Reflections</h2>
-    <div class="card">
-      ${refl.length ? refl.map(i => `<div class="log-entry"><div class="d">Day ${i + 1} · ${esc(DAYS[i].title)}</div>${esc(state.days[i].reflection)}</div>`).join("") : `<div class="hint">Your evening reflections show up here.</div>`}
-    </div>
-
-    <h2>Backup</h2>
-    <div class="card">
-      <p class="source">Progress lives only on this device. Export now and then so you don't lose it.</p>
+    <section class="section">
+      <div class="section-head"><h2>Presence</h2><span class="muted small">1–10 each night</span></div>
+      <div class="chart">${area(confs, 10, "#f2a541")}</div>
+    </section>
+    <section class="section">
+      <div class="section-head"><h2>Fillers</h2><span class="muted small">memo days · lower wins</span></div>
+      <div class="chart">${area(fills, Math.max(5, ...fills.filter(f => f != null)), "#ef8a73")}</div>
+    </section>
+    <section class="section">
+      <div class="section-head"><h2>Journal</h2></div>
+      ${refl.length ? refl.map(i => `<div class="entry"><div class="d">Day ${i + 1} · ${esc(DAYS[i].title)}${state.days[i].confidence ? ` · ${state.days[i].confidence}/10` : ""}</div><div class="txt">${esc(state.days[i].reflection)}</div></div>`).join("") : `<p class="muted">Your evening check-ins collect here.</p>`}
+    </section>
+    <section class="section">
+      <div class="section-head"><h2>Backup</h2></div>
+      <p class="muted small">Progress lives only on this phone. Export once a week.</p>
       <div class="row">
-        <button class="btn" data-act="export">Export</button>
-        <button class="btn" data-act="import">Import</button>
-        <button class="btn" data-act="reset" style="color:var(--bad)">Reset</button>
+        <button class="btn sm" data-act="export">Export</button>
+        <button class="btn sm" data-act="import">Import</button>
+        <button class="btn sm ghost" data-act="reset" style="color:var(--bad)">Reset</button>
       </div>
       <input type="file" id="importFile" accept="application/json" hidden>
-    </div>
+    </section>
   `;
 }
-
 function exportData() {
   const blob = new Blob([JSON.stringify(state, null, 2)], { type: "application/json" });
   const a = document.createElement("a");
@@ -327,12 +465,184 @@ function importData(file) {
   file.text().then(t => {
     const data = JSON.parse(t);
     if (!data || typeof data.days !== "object") throw new Error();
-    state = data; save(); render(); toast("Backup restored");
+    state = { ...load(), ...data }; save(); render(); toast("Backup restored");
   }).catch(() => toast("That file isn't a Charm 21 backup"));
 }
 
-// ── Boot ──────────────────────────────────────────────────────────
-render();
-if ("serviceWorker" in navigator) {
-  window.addEventListener("load", () => navigator.serviceWorker.register("sw.js").catch(() => {}));
+// ── Reminders (push) ──────────────────────────────────────────────
+const isIOS = /iPhone|iPad|iPod/.test(navigator.userAgent);
+const standalone = matchMedia("(display-mode: standalone)").matches || navigator.standalone === true;
+const pushCapable = "serviceWorker" in navigator && "PushManager" in window && "Notification" in window;
+
+function b64uToBytes(s) {
+  const b = atob((s + "=".repeat((4 - (s.length % 4)) % 4)).replace(/-/g, "+").replace(/_/g, "/"));
+  return Uint8Array.from(b, c => c.charCodeAt(0));
 }
+const toCode = obj => btoa(unescape(encodeURIComponent(JSON.stringify(obj)))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+
+function openSheet(html, onClick) {
+  $layer.innerHTML = `<div class="scrim"></div><div class="sheet" role="dialog" aria-modal="true"><div class="grabber"></div>${html}</div>`;
+  const scrim = $layer.querySelector(".scrim"), sheet = $layer.querySelector(".sheet");
+  requestAnimationFrame(() => { scrim.classList.add("open"); sheet.classList.add("open"); });
+  scrim.onclick = closeSheet;
+  sheet.onclick = onClick;
+  let sy = null;
+  sheet.addEventListener("touchstart", e => { if (sheet.scrollTop <= 0) sy = e.touches[0].clientY; }, { passive: true });
+  sheet.addEventListener("touchend", e => { if (sy != null && e.changedTouches[0].clientY - sy > 90) closeSheet(); sy = null; });
+}
+function closeSheet() {
+  const scrim = $layer.querySelector(".scrim"), sheet = $layer.querySelector(".sheet");
+  if (!sheet) return;
+  scrim.classList.remove("open"); sheet.classList.remove("open");
+  setTimeout(() => { $layer.innerHTML = ""; }, 400);
+}
+
+function remindersHTML() {
+  const n = state.notify, lvl = n.level;
+  const ti = todayIndex(), previewDay = Math.max(0, Math.min(ti, 20));
+  let status;
+  if (isIOS && !standalone) {
+    status = `<div class="status warn"><span class="dot"></span><div><b>Install first.</b> iPhone only allows notifications for apps on the Home Screen.
+      <ol class="steps"><li>Tap <b>Share</b> in Safari</li><li>Tap <b>Add to Home Screen</b></li><li>Open Charm 21 from your Home Screen and come back here</li></ol></div></div>`;
+  } else if (!pushCapable) {
+    status = `<div class="status warn"><span class="dot"></span><div>This browser can't receive push. Use Safari on iPhone (installed to Home Screen) or Chrome.</div></div>`;
+  } else if (Notification.permission === "denied") {
+    status = `<div class="status warn"><span class="dot"></span><div><b>Blocked.</b> Settings → Notifications → Charm 21 → Allow Notifications. Then come back.</div></div>`;
+  } else if (n.code) {
+    status = `<div class="status ok"><span class="dot"></span><div><b>This phone is subscribed</b> at <b>${LEVELS[lvl].name}</b>.
+      ${n.pendingCode ? `<div style="margin-top:8px">Last step: send the code below to Claude so the reminder server knows where to find you.</div>` : ""}
+      <div class="code" id="code">${esc(n.code)}</div>
+      <div class="row" style="margin-top:10px"><button class="btn sm" data-r="copy">Copy code</button>${navigator.share ? `<button class="btn sm" data-r="share">Share</button>` : ""}<button class="btn sm ghost" data-r="sent">${n.pendingCode ? "I sent it" : "Sent ✓"}</button></div></div></div>`;
+  } else {
+    status = `<div class="status"><span class="dot"></span><div><b>Off.</b> Pick an intensity, then turn them on.</div></div>`;
+  }
+  const counts = Object.fromEntries(Object.keys(LEVELS).map(k => [k, SLOTS.filter(s => s.levels.includes(k)).length]));
+  return `
+    <div class="eyebrow ember">Reminders</div>
+    <h1>Let the plan <em>find you.</em></h1>
+    <p class="muted" style="margin-top:10px">Pushed to your lock screen at set times, with the day's actual mission, line and question in each one.</p>
+    ${status}
+    <div class="section-head" style="margin-top:28px"><h2>Intensity</h2></div>
+    <div class="levels">
+      ${Object.entries(LEVELS).map(([k, v]) => `
+        <button class="level ${k === lvl ? "on" : ""}" data-r="level:${k}">
+          <span><div class="n">${v.name}</div><div class="b">${v.blurb}</div></span>
+          <span class="c">${counts[k]}<small> /day</small></span>
+        </button>`).join("")}
+    </div>
+    ${pushCapable && !(isIOS && !standalone) && Notification.permission !== "denied" ? `
+      <div class="row" style="margin-top:18px">
+        <button class="btn hot" data-r="enable">${n.code ? "Re-subscribe" : "Turn on reminders"}</button>
+        ${Notification.permission === "granted" ? `<button class="btn" data-r="test">Test</button>` : ""}
+      </div>` : ""}
+    <div class="section-head" style="margin-top:32px"><h2>${ti < 0 ? "Day 1's schedule" : "Today's schedule"}</h2><span class="muted small">Pacific time</span></div>
+    <div class="sched">
+      ${SLOTS.map(sl => {
+        const m = buildMessage(sl.id, ti === -1 && sl.id === "checkin" ? -1 : previewDay);
+        const on = sl.levels.includes(lvl);
+        return `<div class="slot ${on ? "" : "off"}"><div class="time">${sl.time}</div><div><div class="ttl">${esc(m?.title || sl.label)}</div><div class="body">${esc(m?.body || "")}</div></div></div>`;
+      }).join("")}
+    </div>
+    ${"setAppBadge" in navigator ? `
+    <button class="toggle" data-r="badge"><span><div style="font-weight:800">Icon badge</div><div class="muted small">Unfinished items for today on the app icon</div></span><span class="switch ${n.badge ? "on" : ""}"></span></button>` : ""}
+    <div class="row" style="margin-top:18px"><button class="btn ghost" data-r="close">Done</button></div>
+  `;
+}
+function openReminders() { openSheet(remindersHTML(), onRemindersClick); }
+function refreshSheet() {
+  const sheet = $layer.querySelector(".sheet");
+  if (sheet) { const y = sheet.scrollTop; sheet.innerHTML = `<div class="grabber"></div>${remindersHTML()}`; sheet.scrollTop = y; }
+  render();
+}
+async function onRemindersClick(e) {
+  const el = e.target.closest("[data-r]");
+  if (!el) return;
+  const [act, arg] = el.dataset.r.split(":");
+  const n = state.notify;
+  if (act === "close") return closeSheet();
+  if (act === "level") {
+    n.level = arg;
+    if (n.code) await makeCode(true);
+    save(); refreshSheet();
+  }
+  if (act === "enable") {
+    try {
+      const perm = await Notification.requestPermission();
+      if (perm !== "granted") { toast("Notifications not allowed"); return refreshSheet(); }
+      await makeCode(true);
+      const reg = await navigator.serviceWorker.ready;
+      reg.showNotification("Reminders are on", { body: "Send your code to Claude and the first brief lands at 7:25.", icon: "icons/icon-192.png", badge: "icons/icon-192.png", tag: "welcome" });
+      save(); refreshSheet();
+    } catch (err) { toast("Couldn't subscribe: " + (err.message || err)); }
+  }
+  if (act === "test") {
+    const reg = await navigator.serviceWorker.ready;
+    const m = buildMessage("morning", Math.max(0, Math.min(todayIndex(), 20)));
+    reg.showNotification(m.title, { body: m.body, icon: "icons/icon-192.png", badge: "icons/icon-192.png", tag: "test", data: { go: "now" } });
+  }
+  if (act === "copy") { await navigator.clipboard.writeText(n.code).then(() => toast("Code copied"), () => toast("Long-press the code to copy")); }
+  if (act === "share") { navigator.share({ title: "Charm 21 reminder code", text: n.code }).catch(() => {}); }
+  if (act === "sent") { n.pendingCode = false; save(); refreshSheet(); }
+  if (act === "badge") { n.badge = !n.badge; save(); refreshSheet(); }
+}
+async function makeCode(markPending) {
+  const reg = await navigator.serviceWorker.ready;
+  let sub = await reg.pushManager.getSubscription();
+  if (!sub) sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64uToBytes(VAPID_PUBLIC_KEY) });
+  const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const code = toCode({ s: sub.toJSON(), l: state.notify.level, tz });
+  if (code !== state.notify.code && markPending) state.notify.pendingCode = true;
+  state.notify.code = code;
+}
+document.getElementById("bell").addEventListener("click", openReminders);
+
+function updateBadge() {
+  if (!("setAppBadge" in navigator)) return;
+  const ti = todayIndex();
+  if (!state.notify?.badge || !inPlan(ti)) return navigator.clearAppBadge?.().catch(() => {});
+  const left = tasksFor(ti).filter(t => !t.done).length;
+  (left ? navigator.setAppBadge(left) : navigator.clearAppBadge()).catch(() => {});
+}
+
+// ── Onboarding ────────────────────────────────────────────────────
+function onboarding() {
+  const ti = todayIndex();
+  const slides = [
+    `<div class="big">Twenty-one <em>days.</em></div><p>You don't wait to feel confident. You act, and the feeling catches up. ${ti < 0 ? `Day 1 is ${fmtDate(0, { weekday: "long" })}.` : ""}</p>`,
+    `<div class="big">Three <em>weeks.</em></div><div class="weeks">${WEEKS.map(w => `<div><b>${w.name}</b><span>${w.tagline}</span></div>`).join("")}</div>`,
+    `<div class="big">Tap <em>+</em> after every stranger.</div><p>That orange button is your rep counter. Every tap is evidence. Every evening, one bar and one honest paragraph.</p>`,
+    `<div class="big">Let it <em>find you.</em></div><p>Up to 8 pushes a day: the brief, your missions, a line to fix, a question at night.</p>`,
+  ];
+  let k = 0;
+  const el = document.createElement("div");
+  el.className = "onboard";
+  const draw = () => {
+    el.innerHTML = `<div class="ambient"></div><div class="slides"><div class="slide">${slides[k]}</div></div>
+      <div class="dots">${slides.map((_, j) => `<i class="${j === k ? "on" : ""}"></i>`).join("")}</div>
+      <div class="actions">
+        <button class="btn ghost" data-o="skip">${k === slides.length - 1 ? "Later" : "Skip"}</button>
+        <button class="btn hot" data-o="next">${k === slides.length - 1 ? "Set up reminders" : "Next"}</button>
+      </div>`;
+  };
+  const finish = openRem => { state.onboarded = true; save(); el.remove(); if (openRem) openReminders(); };
+  el.addEventListener("click", e => {
+    const o = e.target.closest("[data-o]")?.dataset.o;
+    if (o === "skip") finish(false);
+    if (o === "next") { if (k < slides.length - 1) { k++; draw(); } else finish(true); }
+  });
+  draw();
+  document.body.appendChild(el);
+}
+
+// ── Boot ──────────────────────────────────────────────────────────
+render(true);
+updateBadge();
+if (!state.onboarded) onboarding();
+const q = new URLSearchParams(location.search).get("go");
+if (q) { handleGo(q); history.replaceState(null, "", location.pathname); }
+if ("serviceWorker" in navigator) {
+  navigator.serviceWorker.register("sw.js").catch(() => {});
+  navigator.serviceWorker.addEventListener("message", e => e.data?.go && handleGo(e.data.go));
+}
+// Refresh phase/greeting and the right-now card when the app comes back to the foreground.
+document.addEventListener("visibilitychange", () => { if (!document.hidden && !$layer.innerHTML) rerender(); });
